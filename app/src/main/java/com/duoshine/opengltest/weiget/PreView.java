@@ -1,18 +1,25 @@
 package com.duoshine.opengltest.weiget;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Point;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
+import android.opengl.GLUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 
+import com.duoshine.opengltest.MyApplication;
+import com.duoshine.opengltest.R;
 import com.duoshine.opengltest.util.CameraUtil;
+import com.duoshine.opengltest.water.WaterSignSProgram;
+import com.duoshine.opengltest.water.WaterSignature;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -62,6 +69,8 @@ public class PreView extends GLSurfaceView implements GLSurfaceView.Renderer, Su
     private FloatBuffer mGLVertexBuffer;
     private FloatBuffer mGLTextureBuffer;
     private CameraUtil cameraUtil;
+    private WaterSignature mWaterSign;
+    private int mSignTexId;
 
     public PreView(Context context) {
         this(context, null);
@@ -109,7 +118,53 @@ public class PreView extends GLSurfaceView implements GLSurfaceView.Renderer, Su
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         Log.d(TAG, "onSurfaceCreated: ");
         initCamera();
+
+        // This renderer required OES_EGL_image_external extension
+        final String extensions = GLES20.glGetString(GLES20.GL_EXTENSIONS);    // API >= 8
+        // 使用黄色清除界面
+        GLES20.glClearColor(1.0f, 1.0f, 0.0f, 1.0f);
+        //设置水印
+        if (mWaterSign == null) {
+            mWaterSign = new WaterSignature();
+        }
+        //设置阴影
+        mWaterSign.setShaderProgram(new WaterSignSProgram());
+        mSignTexId = loadTexture(MyApplication.getContext(), R.mipmap.watermark);
     }
+
+    private int loadTexture(Context context, int resourceId) {
+        final int[] textureObjectIds = new int[1];
+        GLES20.glGenTextures(1, textureObjectIds, 0);
+        if (textureObjectIds[0] == 0) {
+            Log.e(TAG, "Could not generate a new OpenGL texture object!");
+            return 0;
+        }
+        final BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inScaled = false;   //指定需要的是原始数据，非压缩数据
+        final Bitmap bitmap = BitmapFactory.decodeResource(context.getResources(), resourceId, options);
+        if (bitmap == null) {
+            Log.e(TAG, "Resource ID " + resourceId + "could not be decode");
+            GLES20.glDeleteTextures(1, textureObjectIds, 0);
+            return 0;
+        }
+        //告诉OpenGL后面纹理调用应该是应用于哪个纹理对象
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureObjectIds[0]);
+        //设置缩小的时候（GL_TEXTURE_MIN_FILTER）使用mipmap三线程过滤
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR);
+        //设置放大的时候（GL_TEXTURE_MAG_FILTER）使用双线程过滤
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        //Android设备y坐标是反向的，正常图显示到设备上是水平颠倒的，解决方案就是设置纹理包装，纹理T坐标（y）设置镜面重复
+        //ball读取纹理的时候  t范围坐标取正常值+1
+        //GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_MIRRORED_REPEAT);
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0);
+        bitmap.recycle();
+        //快速生成mipmap贴图
+        GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D);
+        //解除纹理操作的绑定
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+        return textureObjectIds[0];
+    }
+
 
     @Override
     public void onSurfaceChanged(GL10 gl, int width, int height) {
@@ -126,10 +181,10 @@ public class PreView extends GLSurfaceView implements GLSurfaceView.Renderer, Su
     @Override
     public void onDrawFrame(GL10 gl) {
         Log.d(TAG, "onDrawFrame: ");
-
         //清理屏幕：可以清理成指定的颜色
         GLES20.glClearColor(0, 0, 0, 0);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+
 
         surfaceTexture.updateTexImage();//更新纹理成为最新的数据
         surfaceTexture.getTransformMatrix(mtx);
@@ -155,6 +210,14 @@ public class PreView extends GLSurfaceView implements GLSurfaceView.Renderer, Su
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4); //开始渲染
 
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0); //解绑纹理
+
+        //添加静态水印
+        GLES20.glEnable(GLES20.GL_BLEND);
+        //开启GL的混合模式，即图像叠加 这里最重要的是要开启GL的混合模式，不然绘制的水印会覆盖原先的预览画面
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+        //画水印（非动态） 中间这里是你绘制的预览画面
+        GLES20.glViewport(20, 20, 288, 120);
+        mWaterSign.drawFrame(mSignTexId);
     }
 
     private void initCamera() {
@@ -236,7 +299,7 @@ public class PreView extends GLSurfaceView implements GLSurfaceView.Renderer, Su
 
     @Override
     public boolean onTouch(View v, MotionEvent event) {
-        Log.d(TAG, "onTouch: "+event.getAction());
+        Log.d(TAG, "onTouch: " + event.getAction());
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
             Log.d(TAG, "onTouch: -");
             int rawX = (int) event.getRawX();
