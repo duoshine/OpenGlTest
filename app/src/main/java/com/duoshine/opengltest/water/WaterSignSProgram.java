@@ -5,10 +5,6 @@ import android.opengl.GLES20;
 import android.util.Log;
 
 
-/**
- * Created by fenghaitao on 2019/9/12.
- */
-
 public class WaterSignSProgram{
 
     private static final String TAG = "WaterSignSProgram";

@@ -9,10 +9,6 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 
 
-/**
- * Created by fenghaitao on 2019/9/12.
- */
-
 public class WaterSignature {
 
     private static final String VERTEX_SHADER =
